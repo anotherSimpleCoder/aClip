@@ -1,2 +1,4 @@
 concept/*.wav
 concept/*.mp3
+build
+cmake-build-debug

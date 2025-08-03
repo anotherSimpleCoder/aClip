@@ -2,7 +2,7 @@
 #include <cmath>
 
 //==============================================================================
-AGainAudioProcessor::AGainAudioProcessor()
+AClipAudioProcessor::AClipAudioProcessor()
      : AudioProcessor (BusesProperties()
                      #if ! JucePlugin_IsMidiEffect
                       #if ! JucePlugin_IsSynth
@@ -12,9 +12,9 @@ AGainAudioProcessor::AGainAudioProcessor()
                      #endif
                        )
 {
-	addParameter(gain = new juce::AudioParameterFloat(
-			{"gain", 1}, 
-			"Gain", 
+	addParameter(threshold = new juce::AudioParameterFloat(
+			{"threshold", 1},
+			"Threshold",
 			juce::NormalisableRange<float>(0.0f, 1.0f),
 			1.0f,
 			"",
@@ -34,20 +34,46 @@ AGainAudioProcessor::AGainAudioProcessor()
 				}
 
 				return std::pow(10.0f, dbValue / 20.0f);
-			}));
+			})
+	);
+
+    addParameter(makeup = new juce::AudioParameterFloat(
+            {"makeup", 1},
+            "Makeup Gain",
+            juce::NormalisableRange<float>(0.0316227766f, 31.6227766f),
+            1.0f,
+            "",
+            juce::AudioProcessorParameter::genericParameter,
+            [](float value, int) {
+                if(value <= 0.0f) {
+                    return juce::String("-inf dB");
+                }
+
+                float dbValue = 20.0f * std::log10(value);
+                return juce::String(dbValue, 1) + " dB";
+            },
+            [](const juce::String& text){
+                float dbValue = text.getFloatValue();
+                if(dbValue <= 60.0f) {
+                    return 0.0f;
+                }
+
+                return std::pow(10.0f, dbValue / 20.0f);
+            })
+    );
 }
 
-AGainAudioProcessor::~AGainAudioProcessor()
+AClipAudioProcessor::~AClipAudioProcessor()
 {
 }
 
 //==============================================================================
-const juce::String AGainAudioProcessor::getName() const
+const juce::String AClipAudioProcessor::getName() const
 {
     return JucePlugin_Name;
 }
 
-bool AGainAudioProcessor::acceptsMidi() const
+bool AClipAudioProcessor::acceptsMidi() const
 {
    #if JucePlugin_WantsMidiInput
     return true;
@@ -56,7 +82,7 @@ bool AGainAudioProcessor::acceptsMidi() const
    #endif
 }
 
-bool AGainAudioProcessor::producesMidi() const
+bool AClipAudioProcessor::producesMidi() const
 {
    #if JucePlugin_ProducesMidiOutput
     return true;
@@ -65,7 +91,7 @@ bool AGainAudioProcessor::producesMidi() const
    #endif
 }
 
-bool AGainAudioProcessor::isMidiEffect() const
+bool AClipAudioProcessor::isMidiEffect() const
 {
    #if JucePlugin_IsMidiEffect
     return true;
@@ -74,53 +100,53 @@ bool AGainAudioProcessor::isMidiEffect() const
    #endif
 }
 
-double AGainAudioProcessor::getTailLengthSeconds() const
+double AClipAudioProcessor::getTailLengthSeconds() const
 {
     return 0.0;
 }
 
-int AGainAudioProcessor::getNumPrograms()
+int AClipAudioProcessor::getNumPrograms()
 {
     return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
                 // so this should be at least 1, even if you're not really implementing programs.
 }
 
-int AGainAudioProcessor::getCurrentProgram()
+int AClipAudioProcessor::getCurrentProgram()
 {
     return 0;
 }
 
-void AGainAudioProcessor::setCurrentProgram (int index)
+void AClipAudioProcessor::setCurrentProgram (int index)
 {
     juce::ignoreUnused (index);
 }
 
-const juce::String AGainAudioProcessor::getProgramName (int index)
+const juce::String AClipAudioProcessor::getProgramName (int index)
 {
     juce::ignoreUnused (index);
     return {};
 }
 
-void AGainAudioProcessor::changeProgramName (int index, const juce::String& newName)
+void AClipAudioProcessor::changeProgramName (int index, const juce::String& newName)
 {
     juce::ignoreUnused (index, newName);
 }
 
 //==============================================================================
-void AGainAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void AClipAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
     juce::ignoreUnused (sampleRate, samplesPerBlock);
 }
 
-void AGainAudioProcessor::releaseResources()
+void AClipAudioProcessor::releaseResources()
 {
     // When playback stops, you can use this as an opportunity to free up any
     // spare memory, etc.
 }
 
-bool AGainAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool AClipAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
   #if JucePlugin_IsMidiEffect
     juce::ignoreUnused (layouts);
@@ -144,11 +170,10 @@ bool AGainAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
   #endif
 }
 
-void AGainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+void AClipAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midiMessages)
 {
-    buffer.applyGain(*gain);
-    /*
+
     juce::ignoreUnused (midiMessages);
 
     juce::ScopedNoDenormals noDenormals;
@@ -170,28 +195,39 @@ void AGainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // the samples and the outer loop is handling the channels.
     // Alternatively, you can process the samples with the channels
     // interleaved by keeping the same state.
+    float boundary = threshold->get();
+    float negativeBoundary = boundary * -1;
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* channelData = buffer.getWritePointer (channel);
-        juce::ignoreUnused (channelData);
-        // ..do something to the data...
+        auto* audioInput = buffer.getReadPointer(channel);
+        auto* audioOutput = buffer.getWritePointer (channel);
+
+
+        if (*audioInput >= boundary) {
+            *audioOutput = 1;
+        }
+
+        if (*audioInput <= negativeBoundary) {
+            *audioOutput = -1;
+        }
     }
-    */
+
+    buffer.applyGain(makeup->get());
 }
 
 //==============================================================================
-bool AGainAudioProcessor::hasEditor() const
+bool AClipAudioProcessor::hasEditor() const
 {
     return false;
 }
 
-juce::AudioProcessorEditor* AGainAudioProcessor::createEditor()
+juce::AudioProcessorEditor* AClipAudioProcessor::createEditor()
 {
     return nullptr;
 }
 
 //==============================================================================
-void AGainAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void AClipAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // You should use this method to store your parameters in the memory block.
     // You could do that either as raw data, or use the XML or ValueTree classes
@@ -199,7 +235,7 @@ void AGainAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     juce::ignoreUnused (destData);
 }
 
-void AGainAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void AClipAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     // You should use this method to restore your parameters from this memory block,
     // whose contents will have been created by the getStateInformation() call.
@@ -210,6 +246,6 @@ void AGainAudioProcessor::setStateInformation (const void* data, int sizeInBytes
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new AGainAudioProcessor();
+    return new AClipAudioProcessor();
 }
 
